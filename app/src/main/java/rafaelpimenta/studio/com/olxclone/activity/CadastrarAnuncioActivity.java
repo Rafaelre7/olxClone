@@ -6,28 +6,37 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Bundle;
 import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.Spinner;
+import android.widget.Toast;
 
 import com.blackcat.currencyedittext.CurrencyEditText;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
+import com.google.firebase.storage.StorageReference;
+import com.google.firebase.storage.UploadTask;
 import com.santalu.maskedittext.MaskEditText;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import dmax.dialog.SpotsDialog;
 import rafaelpimenta.studio.com.olxclone.R;
+import rafaelpimenta.studio.com.olxclone.helper.ConfiguracaoFirebase;
 import rafaelpimenta.studio.com.olxclone.helper.Permissoes;
+import rafaelpimenta.studio.com.olxclone.model.Anuncio;
 
 public class CadastrarAnuncioActivity extends AppCompatActivity
         implements View.OnClickListener {
@@ -37,6 +46,9 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
     private MaskEditText campoTelefone;
     private ImageView imagem1, imagem2, imagem3;
     private Spinner campoEstado, campoCategoria;
+    private Anuncio anuncio;
+    private StorageReference storage;
+    private android.app.AlertDialog dialog;
 
 
     private String[] permissoes = new String[]{
@@ -47,11 +59,16 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
 
     private List<String> listaFotosRecuperadas = new ArrayList<>();
 
+    private List<String> listaUrlFotos = new ArrayList<>();
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_cadastrar_anuncio);
+
+        //Configuracoes iniciais
+        storage = ConfiguracaoFirebase.getFirebaseStorage();
 
         //Validar permissoes
         Permissoes.validarPermissoes(permissoes, this, 1);
@@ -68,7 +85,7 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
         //Configurar estados
         String[] estados = getResources().getStringArray(R.array.estados);
         ArrayAdapter<String> arrayAdapter = new ArrayAdapter<>(
-                this,android.R.layout.simple_spinner_item,
+                this, android.R.layout.simple_spinner_item,
                 estados
         );
         arrayAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -76,12 +93,11 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
 
         String[] categorias = getResources().getStringArray(R.array.categoria);
         ArrayAdapter<String> arrayCategorias = new ArrayAdapter<>(
-                this,android.R.layout.simple_spinner_item,
+                this, android.R.layout.simple_spinner_item,
                 categorias
         );
         arrayCategorias.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         campoCategoria.setAdapter(arrayCategorias);
-
 
 
     }
@@ -103,20 +119,127 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
         imagem3.setOnClickListener(this);
 
 
-
         //Configura localidade para pt - > Portugues BR -> Brasil || vem como padrão dinamico
         Locale locale = new Locale("pt", "BR");
         campoValor.setLocale(locale);
 
     }
 
-    public void salvarAnuncio(View view) {
-        String valor = campoValor.getHintString();
-//        Long valor = campoValor.getRawValue(); //trazero valor sem mascara RawValue e usar Var como Long
-        Log.d("salvar", "Valor: " + valor);
+    public void salvarAnuncio() {
+        //Exibi o dado carregando
+        dialog = new SpotsDialog.Builder()
+                .setContext(this)
+                .setMessage("Salvando Anúncio")
+                .setCancelable(false)
+                .build();
+        dialog.show();
 
-        String telefone = campoTelefone.getRawText();
-        Log.d("salvar", "Telefone: " + telefone);
+        /*Salvar imagem no Storage*/
+
+        for (int i = 0; i < listaFotosRecuperadas.size(); i++) {
+            String urlmagem = listaFotosRecuperadas.get(i);
+            int tamanhoLista = listaFotosRecuperadas.size();
+
+            salvarFotoStorage(urlmagem, tamanhoLista, i);
+
+        }
+
+    }
+
+    private void salvarFotoStorage(String urlmagem, final int totalFotos, int contador) {
+
+        //Cria o nó dentro do storage
+        StorageReference imagemAnuncio = storage.child("imagens")
+                .child("anuncio")
+                .child(anuncio.getIdAnuncio())
+                .child("imagem" + contador);
+
+        //Fazer upload do arquivo
+        UploadTask uploadTask = imagemAnuncio.putFile(Uri.parse(urlmagem));
+        uploadTask.addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+            @Override
+            public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+                Task<Uri> firebaseUrl = taskSnapshot.getStorage().getDownloadUrl();
+                String urlConvertida = firebaseUrl.toString();
+
+                listaUrlFotos.add(urlConvertida);
+
+                if (totalFotos == listaUrlFotos.size()) {
+                    anuncio.setFotos(listaUrlFotos);
+                    anuncio.salvar();
+
+                    dialog.dismiss();
+                    finish();
+                    alerta("Anuncio salvo com sucesso !");
+                }
+            }
+        }).addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                alerta("Falha ao fazer upload");
+                Log.i("INFO", "Falha ao fazer upload: " + e.getMessage());
+            }
+        });
+
+    }
+
+    private Anuncio configurarAnuncio() {
+
+        String estado = campoEstado.getSelectedItem().toString().trim();
+        String categoria = campoCategoria.getSelectedItem().toString().trim();
+        String titulo = campoTitulo.getText().toString().trim();
+        String valor = campoValor.getText().toString();
+        String telefone = campoTelefone.getText().toString().trim();
+        String descricao = campoDescricao.getText().toString().trim();
+
+        Anuncio anuncio = new Anuncio();
+        anuncio.setEstado(estado);
+        anuncio.setCategoria(categoria);
+        anuncio.setTitulo(titulo);
+        anuncio.setValor(valor);
+        anuncio.setTelefone(telefone);
+        anuncio.setDescricao(descricao);
+
+        return anuncio;
+    }
+
+    public void validarDadosAnuncio(View view) {
+
+        anuncio = configurarAnuncio();
+        String valor = String.valueOf(campoValor.getRawValue());
+
+        if (listaFotosRecuperadas.size() != 0) {
+            if (!anuncio.getEstado().isEmpty()) {
+                if (!anuncio.getCategoria().isEmpty()) {
+                    if (!anuncio.getTitulo().isEmpty()) {
+                        if (!valor.isEmpty() && !valor.equals("0")) {
+                            if (!anuncio.getTelefone().isEmpty()) {
+                                if (!anuncio.getDescricao().isEmpty()) {
+                                    salvarAnuncio();
+                                } else {
+                                    alerta("Preencha o campo descrição !");
+                                }
+                            } else {
+                                alerta("Preencha o campo telefone corretamente !");
+                            }
+                        } else {
+                            alerta("Preencha o campo valor !");
+                        }
+                    } else {
+                        alerta("Preencha o campo título !");
+                    }
+
+                } else {
+                    alerta("Selecione a categoria !");
+                }
+
+            } else {
+                alerta("Selecione o estado !");
+            }
+        } else {
+            alerta("Selecione ao menos uma foto!");
+        }
+
     }
 
     @Override
@@ -164,7 +287,7 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
 
     private void escolherImagem(int requestCode) {
         Intent i = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-        startActivityForResult(i,requestCode);
+        startActivityForResult(i, requestCode);
 
     }
 
@@ -172,19 +295,19 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        if(resultCode == Activity.RESULT_OK){
+        if (resultCode == Activity.RESULT_OK) {
             //Recupera a imagem
 
             Uri imagemSelecionada = data.getData();
             String caminhoImagem = imagemSelecionada.toString();
 
             //Configura no ImageView
-            if(requestCode == 1){
+            if (requestCode == 1) {
                 imagem1.setImageURI(imagemSelecionada);
 //                listaFotosRecuperadas.add(caminhoImagem);
-            }else if (requestCode == 2){
+            } else if (requestCode == 2) {
                 imagem2.setImageURI(imagemSelecionada);
-            }else if (requestCode == 3){
+            } else if (requestCode == 3) {
                 imagem3.setImageURI(imagemSelecionada);
             }
 
@@ -192,5 +315,9 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
             listaFotosRecuperadas.add(caminhoImagem);
 
         }
+    }
+
+    private void alerta(String msg) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
 }
