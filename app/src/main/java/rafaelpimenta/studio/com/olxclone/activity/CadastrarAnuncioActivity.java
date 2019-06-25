@@ -12,7 +12,6 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -21,8 +20,8 @@ import android.widget.Spinner;
 import android.widget.Toast;
 
 import com.blackcat.currencyedittext.CurrencyEditText;
-import com.google.android.gms.tasks.OnFailureListener;
-import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Continuation;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
@@ -139,49 +138,48 @@ public class CadastrarAnuncioActivity extends AppCompatActivity
         for (int i = 0; i < listaFotosRecuperadas.size(); i++) {
             String urlmagem = listaFotosRecuperadas.get(i);
             int tamanhoLista = listaFotosRecuperadas.size();
-
             salvarFotoStorage(urlmagem, tamanhoLista, i);
-
         }
 
     }
 
-    private void salvarFotoStorage(String urlmagem, final int totalFotos, int contador) {
+    private void salvarFotoStorage(final String urlmagem, final int totalFotos, int contador) {
 
         //Cria o nó dentro do storage
-        StorageReference imagemAnuncio = storage.child("imagens")
+        final StorageReference imagemAnuncio = storage.child("imagens")
                 .child("anuncio")
                 .child(anuncio.getIdAnuncio())
                 .child("imagem" + contador);
 
         //Fazer upload do arquivo
         UploadTask uploadTask = imagemAnuncio.putFile(Uri.parse(urlmagem));
-        uploadTask.addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+        uploadTask.continueWithTask(new Continuation<UploadTask.TaskSnapshot, Task<Uri> >() {
             @Override
-            public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
-                Task<Uri> firebaseUrl = taskSnapshot.getStorage().getDownloadUrl();
-                String urlConvertida = firebaseUrl.toString();
+            public Task<Uri> then(@NonNull Task<UploadTask.TaskSnapshot> task) throws Exception {
+                if(!task.isSuccessful()){
+                    throw task.getException();
+                }
+                return imagemAnuncio.getDownloadUrl();
+            }
+        }).addOnCompleteListener(new OnCompleteListener<Uri>() {
+            @Override
+            public void onComplete(@NonNull Task<Uri> task) {
+                if(task.isSuccessful()){
+                    Uri downloadUrl = task.getResult();
+                    listaUrlFotos.add(downloadUrl.toString());
+                    if(totalFotos == listaUrlFotos.size()){
+                        anuncio.setFotos(listaUrlFotos);
+                        anuncio.salvar();
 
-                listaUrlFotos.add(urlConvertida);
-
-                if (totalFotos == listaUrlFotos.size()) {
-                    anuncio.setFotos(listaUrlFotos);
-                    anuncio.salvar();
-
-                    dialog.dismiss();
-                    finish();
-                    alerta("Anuncio salvo com sucesso !");
+                        dialog.dismiss();
+                        finish();
+                        alerta("Anuncio salvo com sucesso !");
+                    }
                 }
             }
-        }).addOnFailureListener(new OnFailureListener() {
-            @Override
-            public void onFailure(@NonNull Exception e) {
-                alerta("Falha ao fazer upload");
-                Log.i("INFO", "Falha ao fazer upload: " + e.getMessage());
-            }
         });
-
     }
+
 
     private Anuncio configurarAnuncio() {
 

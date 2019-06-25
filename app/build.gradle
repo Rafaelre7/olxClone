@@ -38,5 +38,10 @@ dependencies {
     implementation 'com.github.santalu:mask-edittext:1.0.7'
     //Dependencia para dialog
     implementation 'com.github.d-max:spots-dialog:1.1@aar'
+    //Dependencia para Picasso
+    implementation 'com.squareup.picasso:picasso:2.71828'
+    implementation 'com.github.bumptech.glide:glide:4.3.1'
+    //Biblioteca de slider
+    implementation 'com.synnapps:carouselview:0.1.5'
 }
 apply plugin: 'com.google.gms.google-services'
